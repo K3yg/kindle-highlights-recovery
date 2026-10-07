@@ -1,0 +1,5 @@
+# Needed by kfxlib (vendor/KFX Input.zip) to decode KFX books.
+pillow
+pypdf
+lxml
+beautifulsoup4

@@ -1,0 +1,26 @@
+# Personal data: never commit anything copied off a Kindle or exported from it.
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+ksdk_annotation*
+*.kfx
+*.azw
+*.azw3
+*.yjr
+*.yjf
+*.sdr/
+My Clippings*.txt
+kindle-highlights/
+Kindle Highlights/
+.kindle/
+
+# Python / build
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+*.spec
+.venv/
+venv/
