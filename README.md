@@ -53,14 +53,23 @@ anything by hand.
    Start Menu.
 4. **Plug in your Kindle with a data cable and unlock it.** Windows can't see
    the Kindle's storage while the lock screen is showing.
-5. Open **Kindle Highlights Recovery** and:
-   1. click **Read Kindle (USB)**. Your books with highlights are listed by title.
-   2. click the books you want, or the ☐ header to select them all.
-   3. click **Export selected**.
+5. Open **Kindle Highlights Recovery**. It finds the Kindle by itself and
+   lists **every book on it**, with how many highlights each one has.
+   - **One book:** double-click it.
+   - **Several:** tick them (or use **Select all**), then click **Export**.
+   - Type in the search box to find a book quickly.
 
-The results go to `Documents\Kindle Highlights` (you can change this at the top
-of the window). When it finishes, the book page or the index opens in your
-browser.
+The interface is available in **English and Portuguese** (top-right corner);
+the exported pages follow the same language.
+
+The results go to `Documents\Kindle Highlights` (you can change this at the
+bottom of the window). When it finishes, the book page or the index opens in
+your browser.
+
+The first time, the app copies each book off the Kindle once to work out which
+file is which book (the ASIN inside the file is the only reliable link, since
+file names usually don't carry it). The copies are cached in
+`Kindle Highlights\.kindle`, so later runs only copy new or changed books.
 
 The first time, the app starts from the Kindle's own `My Clippings.txt`, so the
 entries it wrote before the firmware change are kept. After that it only adds
@@ -104,7 +113,7 @@ git clone https://github.com/K3yg/kindle-highlights-recovery.git
 cd kindle-highlights-recovery
 python3 -m pip install -r requirements.txt
 
-# Graphical app: click "…or open files" and pick the database, then the folder.
+# Graphical app: click "Use files copied from it…" and pick the folder.
 python3 -m khr gui
 
 # Or from the terminal:
@@ -138,6 +147,7 @@ Options for `sync` and `export`:
 | `--out DIR` | Output folder. Default: `./kindle-highlights` |
 | `--format html,md,json` | Which files to write. Default: all three. |
 | `--no-clippings` | Don't touch `My Clippings.txt`. |
+| `--lang en\|pt` | Language of the HTML and Markdown pages. Default: the system's. |
 | `--clippings FILE` | `export` only: update this file instead of `<out>/My Clippings.txt`. |
 
 ## What you get
@@ -172,8 +182,10 @@ Kindle Highlights/
    extracted. Separate paragraphs stay on separate lines.
 3. **Pages and chapters** come from the book's navigation data.
 4. **Matching books.** A book file is matched to its annotations by the book ID
-   (ASIN) inside the file. On the device, the app first guesses from file and
-   folder names, then confirms the ID in the copied file.
+   (ASIN) inside the file, never by its name or title. On the device, a file
+   whose name carries an ASIN is identified from the name; any other file is
+   copied once and searched, and copying stops as soon as every highlighted
+   book has been found.
 
 ## Troubleshooting
 
@@ -188,7 +200,7 @@ Otherwise, unlock it and try again.
 **"DRM-protected, skipped"**: it's a Kindle Store purchase, and its text can't
 be decoded.
 
-**"book file not found" / "no .kfx found"**: the book isn't on the device any
+**"book file not found" / "not on the Kindle"**: the book isn't on the device any
 more (archived or deleted), or it's in a format other than KFX (PDF, AZW3, MOBI).
 
 **A database other than `ksdk_annotation_v1.db`** (for example `_v2`): Amazon
@@ -216,6 +228,7 @@ python -m unittest -v        # no Kindle or book needed
 | `khr/html_page.py` | book pages and the index |
 | `khr/device.py`, `khr/kindle_mtp.ps1` | Windows: copying files from the Kindle over MTP |
 | `khr/gui.py`, `khr/__main__.py` | the app and the command line |
+| `khr/i18n.py` | English and Portuguese strings, saved settings |
 
 Contributions are welcome. A macOS/Linux device backend (for example via
 libmtp) and other export formats would be especially useful.

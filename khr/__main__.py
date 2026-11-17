@@ -6,7 +6,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from . import __version__, annotations, device, html_page, pipeline
+from . import __version__, annotations, device, html_page, i18n, pipeline
 from .book import title_from_filename
 
 STATUS_TEXT = {
@@ -24,7 +24,7 @@ def _formats(value: str) -> tuple[str, ...]:
 
 
 def _report(results: list[pipeline.Result], clippings_file: Path | None,
-            out: Path | None = None) -> int:
+            out: Path | None = None, lang: str | None = None) -> int:
     print()
     ok = 0
     for r in results:
@@ -39,7 +39,7 @@ def _report(results: list[pipeline.Result], clippings_file: Path | None,
     if clippings_file is not None:
         added = sum(r.added_to_clippings for r in results)
         print(f"\nMy Clippings.txt: {added} new entr{'y' if added == 1 else 'ies'} -> {clippings_file}")
-    index = html_page.write_index(out) if out is not None and out.is_dir() else None
+    index = html_page.write_index(out, lang) if out is not None and out.is_dir() else None
     if index:
         print(f"Index of all exported books: {index}")
     return 0 if ok or not results else 1
@@ -79,8 +79,8 @@ def cmd_export(args) -> int:
             results.append(pipeline.Result(b.asin, "missing"))
             continue
         print(f"Exporting {kfx.name}…")
-        results.append(pipeline.export_book(b, kfx, args.out, clip, args.format, taken))
-    return _report(results, clip, args.out)
+        results.append(pipeline.export_book(b, kfx, args.out, clip, args.format, taken, args.lang))
+    return _report(results, clip, args.out, args.lang)
 
 
 def cmd_sync(args) -> int:
@@ -92,8 +92,12 @@ def cmd_sync(args) -> int:
     chosen = [b for b in _select(books, args.asin) if b.highlights or b.notes]
     print(f"{len(books)} books have annotations; exporting {len(chosen)}.")
 
+    print("Identifying the books on the Kindle (slow only the first time)…")
+    on_device = device.list_books()
+    cache = device.identify(on_device, {b.asin for b in chosen}, work)
+    by_asin = {d.asin: d for d in on_device if d.asin}
+
     clip = None if args.no_clippings else out / "My Clippings.txt"
-    listing = device.list_books()
     if clip is not None and not clip.exists():
         # Start from the device's own file, so entries it wrote before the
         # firmware change are kept; we only append what's missing.
@@ -105,15 +109,21 @@ def cmd_sync(args) -> int:
 
     results, taken = [], set()
     for b in chosen:
-        title = listing.titles.get(b.asin, b.asin)
-        print(f"{title}")
-        kfx = device.pull_book(b.asin, title, listing.books, work)
-        if not kfx:
-            results.append(pipeline.Result(b.asin, "missing", title=title,
-                                           message="No matching .kfx on the Kindle."))
+        dev = by_asin.get(b.asin)
+        if not dev:
+            results.append(pipeline.Result(b.asin, "missing",
+                                           message="This book is no longer on the Kindle."))
             continue
-        results.append(pipeline.export_book(b, kfx, out, clip, args.format, taken))
-    return _report(results, clip, out)
+        print(dev.display_title)
+        kfx = device.pull_book(dev, cache)
+        if not kfx:
+            results.append(pipeline.Result(b.asin, "missing", title=dev.display_title,
+                                           message="Couldn't copy the book off the Kindle."))
+            continue
+        res = pipeline.export_book(b, kfx, out, clip, args.format, taken, args.lang)
+        cache.set_title(dev, res.title)
+        results.append(res)
+    return _report(results, clip, out, args.lang)
 
 
 def main(argv=None) -> int:
@@ -133,6 +143,8 @@ def main(argv=None) -> int:
                        help="comma-separated: html,md,json (default: all)")
         p.add_argument("--no-clippings", action="store_true",
                        help="don't write My Clippings.txt")
+        p.add_argument("--lang", choices=sorted(i18n.LANGUAGES), default=i18n.get(),
+                       help="language of the HTML/Markdown pages (default: system language)")
 
     p = sub.add_parser("sync", help="Windows: read everything straight from a connected Kindle")
     common(p)
@@ -150,6 +162,10 @@ def main(argv=None) -> int:
     common(p)
 
     args = ap.parse_args(argv)
+    for stream in (sys.stdout, sys.stderr):
+        # A Windows console may not speak UTF-8; never die over a book title.
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
     if args.command in (None, "gui"):
         from .gui import main as gui_main
         return gui_main()

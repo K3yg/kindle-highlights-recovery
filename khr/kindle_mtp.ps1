@@ -6,21 +6,42 @@ Talk to a Kindle connected over USB (MTP) on Windows. Output is JSON.
   -Action list-books                  List book files and .sdr folders under documents/.
   -Action pull-file -Path <rel> -Dest <dir>
                                       Copy one file (path relative to documents/) into <dir>.
+  -Action pull-files -ListFile <txt> -Dest <dir>
+                                      Copy every file listed in <txt> (UTF-8, one path
+                                      relative to documents/ per line), printing one JSON
+                                      line per file as it finishes.
 
 The Kindle must be plugged in, switched on and UNLOCKED: MTP hides the
 storage while the lock screen is showing.
 #>
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet('status', 'pull-db', 'list-books', 'pull-file')]
+  [ValidateSet('status', 'pull-db', 'list-books', 'pull-file', 'pull-files')]
   [string]$Action,
   [string]$Dest,
-  [string]$Path
+  [string]$Path,
+  [string]$ListFile
 )
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 function Out-Json($obj) { $obj | ConvertTo-Json -Depth 5 -Compress }
+
+function Emit($obj) { [Console]::Out.WriteLine(($obj | ConvertTo-Json -Depth 5 -Compress)); [Console]::Out.Flush() }
+
+function Find-DocFile($docs, $rel, $cache) {
+  $parts = $rel -split '/'
+  $folder = $docs
+  $prefix = ''
+  for ($i = 0; $i -lt $parts.Count - 1; $i++) {
+    $prefix = "$prefix/$($parts[$i])"
+    if (-not $cache.ContainsKey($prefix)) { $cache[$prefix] = Get-Child $folder $parts[$i] }
+    $folder = $cache[$prefix]
+    if (-not $folder) { return $null }
+  }
+  $leaf = $parts[-1]
+  return $folder.Items() | Where-Object { -not $_.IsFolder -and $_.Name -eq $leaf } | Select-Object -First 1
+}
 
 function Fail($msg) { Out-Json @{ ok = $false; error = $msg }; exit 1 }
 
@@ -147,5 +168,23 @@ switch ($Action) {
     if (-not $item) { Fail "File not found on the Kindle: $Path" }
     $f = Copy-Item-Mtp $item $Dest
     Out-Json @{ ok = $true; name = $f.Name; size = $f.Length; path = $f.FullName }
+  }
+  'pull-files' {
+    if (-not $Dest -or -not $ListFile) { Fail '-ListFile and -Dest are required' }
+    $docs = Get-Child $storage 'documents'
+    if (-not $docs) { Fail 'documents folder not found. Is the Kindle unlocked?' }
+    $cache = @{}
+    foreach ($rel in [IO.File]::ReadAllLines($ListFile, [Text.Encoding]::UTF8)) {
+      if (-not $rel.Trim()) { continue }
+      try {
+        $item = Find-DocFile $docs $rel $cache
+        if (-not $item) { throw "File not found on the Kindle: $rel" }
+        $f = Copy-Item-Mtp $item $Dest
+        Emit @{ event = 'file'; rel = $rel; path = $f.FullName; size = $f.Length }
+      } catch {
+        Emit @{ event = 'file'; rel = $rel; error = "$_" }
+      }
+    }
+    Out-Json @{ ok = $true }
   }
 }

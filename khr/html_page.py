@@ -10,15 +10,16 @@ import json
 import re
 from pathlib import Path
 
+from . import i18n
 from .export import BookExport
 
 TEMPLATE = r"""<!DOCTYPE html>
-<html lang="en">
+<html lang="__LANG__">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="generator" content="kindle-highlights-recovery">
-<title>__TITLE__ — highlights</title>
+<title>__TITLE__ — __S_title_suffix__</title>
 <style>
   :root{
     --bg:#f5efe4; --bg2:#faf6ee; --ink:#2b2620; --muted:#857a68;
@@ -88,7 +89,7 @@ TEMPLATE = r"""<!DOCTYPE html>
 <body>
 <div class="wrap">
   <header class="cover">
-    <div class="kicker">Highlights</div>
+    <div class="kicker">__S_kicker__</div>
     <h1>__TITLE__</h1>
     <p class="author">__AUTHOR__</p>
     <div class="rule"></div>
@@ -98,23 +99,24 @@ TEMPLATE = r"""<!DOCTYPE html>
   <div class="toolbar">
     <label class="search">
       <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
-      <input id="q" type="search" placeholder="Search highlights…" autocomplete="off">
+      <input id="q" type="search" placeholder="__S_search__" autocomplete="off">
     </label>
-    <button class="pill" id="copyall" title="Copy every visible highlight, text only">Copy all</button>
-    <button class="icon" id="sort" title="Toggle reading order / date order" aria-label="Sort">⇅</button>
-    <button class="icon" id="theme" title="Toggle dark mode" aria-label="Theme">☾</button>
+    <button class="pill" id="copyall" title="__S_copy_all_tip__">__S_copy_all__</button>
+    <button class="icon" id="sort" title="__S_sort_tip__" aria-label="Sort">⇅</button>
+    <button class="icon" id="theme" title="__S_theme_tip__" aria-label="Theme">☾</button>
   </div>
-  <div class="mode" id="mode">Reading order</div>
+  <div class="mode" id="mode">__S_reading_order__</div>
 
   <main class="quotes" id="list"></main>
-  <p class="empty" id="empty">No highlights match.</p>
-  <footer>Recovered from a Kindle with kindle-highlights-recovery</footer>
+  <p class="empty" id="empty">__S_no_match__</p>
+  <footer>__S_footer__</footer>
 </div>
 
 <script>
 const DATA = __DATA__;
+const L = __L10N__;
 const $ = id => document.getElementById(id);
-const fmt = new Intl.DateTimeFormat(undefined,
+const fmt = new Intl.DateTimeFormat(L.html_lang,
   {weekday:'short', day:'numeric', month:'long', year:'numeric', hour:'2-digit', minute:'2-digit'});
 let term = '', byDate = false;
 
@@ -138,31 +140,31 @@ function render(){
     const f = document.createElement('figure');
     f.className = 'q' + (d.kind === 'note' ? ' note' : '') + (d.text.length > 240 ? ' long' : '');
     const meta = [];
-    if (d.page) meta.push('<span class="pg">p. ' + esc(d.page) + '</span>');
+    if (d.page) meta.push('<span class="pg">' + L.page_abbr + ' ' + esc(d.page) + '</span>');
     if (d.chapter) meta.push('<span>' + esc(d.chapter) + '</span>');
     if (d.created) meta.push('<span>' + esc(fmt.format(new Date(d.created))) + '</span>');
     f.innerHTML = '<blockquote>' + hi(d.text) + '</blockquote>' +
       d.notes.map(n => '<p class="annot">' + hi(n) + '</p>').join('') +
-      '<figcaption>' + meta.join('') + '<button class="copy">Copy</button></figcaption>';
-    f.querySelector('.copy').onclick = e => copy(d.text, e.target, 'Copy');
+      '<figcaption>' + meta.join('') + '<button class="copy">' + L.copy + '</button></figcaption>';
+    f.querySelector('.copy').onclick = e => copy(d.text, e.target, L.copy);
     list.appendChild(f);
   }
   $('empty').style.display = items.length ? 'none' : 'block';
   const total = DATA.length;
-  $('n').textContent = (items.length === total ? total : items.length + ' of ' + total) +
-    (total === 1 ? ' highlight' : ' highlights');
+  $('n').textContent = (items.length === total ? total : items.length + ' ' + L.of + ' ' + total) +
+    ' ' + (total === 1 ? L.one : L.many);
 }
 function copy(text, btn, label){
   navigator.clipboard.writeText(text).then(() => {
-    btn.textContent = 'Copied ✓'; btn.classList.add('done');
+    btn.textContent = L.copied; btn.classList.add('done');
     setTimeout(() => { btn.textContent = label; btn.classList.remove('done'); }, 1500);
   });
 }
 $('q').oninput = e => { term = e.target.value.trim().toLowerCase(); render(); };
-$('sort').onclick = () => { byDate = !byDate; $('mode').textContent = byDate ? 'Date order' : 'Reading order'; render(); };
+$('sort').onclick = () => { byDate = !byDate; $('mode').textContent = byDate ? L.date_order : L.reading_order; render(); };
 $('copyall').onclick = e => {
   const items = visible();
-  copy(items.map(d => d.text).join('\n\n'), e.target, 'Copy all');
+  copy(items.map(d => d.text).join('\n\n'), e.target, L.copy_all);
 };
 const theme = localStorage.getItem('khr-theme');
 if (theme === 'dark') { document.documentElement.dataset.theme = 'dark'; $('theme').textContent = '☀'; }
@@ -179,30 +181,44 @@ render();
 """
 
 
-def write(export: BookExport, path: Path) -> Path:
+def _fill(template: str, subs: dict[str, str], strings: dict[str, str]) -> str:
+    """One pass over the template, so text inside a highlight is never a slot."""
+    def repl(m):
+        key = m.group(0)
+        if key in subs:
+            return subs[key]
+        if key.startswith("__S_"):
+            return html.escape(strings[key[4:-2]])
+        return key
+    return re.sub(r"__[A-Z0-9]+(?:_[A-Za-z0-9]+)*__", repl, template)
+
+
+def write(export: BookExport, path: Path, lang: str | None = None) -> Path:
+    strings = i18n.page_strings(lang)
     data = [{
         "kind": q.kind, "text": q.text, "page": q.page, "chapter": q.chapter,
         "created": q.created.isoformat() if q.created else "", "notes": q.notes,
     } for q in export.quotes]
     # "</" inside the JSON would end the <script> element early.
     payload = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
+    l10n = json.dumps(strings, ensure_ascii=False).replace("</", "<\\/")
     subs = {
         "__DATA__": payload,
-        "__TITLE__": html.escape(export.title or "Untitled"),
+        "__L10N__": l10n,
+        "__LANG__": strings["html_lang"],
+        "__TITLE__": html.escape(export.title or strings["untitled"]),
         "__AUTHOR__": html.escape(export.author_line),
     }
-    # One pass, so text inside a highlight can never be mistaken for a slot.
-    page = re.sub(r"__(?:DATA|TITLE|AUTHOR)__", lambda m: subs[m.group(0)], TEMPLATE)
-    path.write_text(page, encoding="utf-8")
+    path.write_text(_fill(TEMPLATE, subs, strings), encoding="utf-8")
     return path
 
 
 INDEX = r"""<!DOCTYPE html>
-<html lang="en">
+<html lang="__LANG__">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Kindle highlights</title>
+<title>__S_index_title__</title>
 <style>
   body{margin:0; background:#f5efe4; color:#2b2620; line-height:1.5;
     font-family:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif}
@@ -217,15 +233,16 @@ INDEX = r"""<!DOCTYPE html>
 </style>
 </head>
 <body><div class="wrap">
-<h1>Kindle highlights</h1>
+<h1>__S_index_title__</h1>
 <div class="sub">__SUMMARY__</div>
 __CARDS__
 </div></body></html>
 """
 
 
-def write_index(outdir: Path) -> Path | None:
+def write_index(outdir: Path, lang: str | None = None) -> Path | None:
     """index.html linking every book exported into outdir (this run or earlier)."""
+    strings = i18n.page_strings(lang)
     books = []
     for jf in sorted(outdir.glob("*.json")):
         try:
@@ -242,15 +259,19 @@ def write_index(outdir: Path) -> Path | None:
     if not books:
         return None
     books.sort(key=lambda b: b[0].lower())
+
+    def count(n):
+        return f"{n} {strings['one'] if n == 1 else strings['many']}"
     cards = "\n".join(
         f'<a class="card" href="{html.escape(href)}"><span><span class="t">{html.escape(t)}</span>'
         f'{"<br><span class=a>" + html.escape(a) + "</span>" if a else ""}</span>'
-        f'<span class="n">{n} highlight{"" if n == 1 else "s"}</span></a>'
+        f'<span class="n">{html.escape(count(n))}</span></a>'
         for t, a, n, href in books)
     total = sum(b[2] for b in books)
-    summary = f"{len(books)} book{'' if len(books) == 1 else 's'} · {total} highlights"
-    subs = {"__CARDS__": cards, "__SUMMARY__": summary}
-    page = re.sub(r"__(?:CARDS|SUMMARY)__", lambda m: subs[m.group(0)], INDEX)
+    nb = len(books)
+    summary = f"{nb} {strings['book'] if nb == 1 else strings['books']} · {count(total)}"
+    subs = {"__CARDS__": cards, "__SUMMARY__": html.escape(summary),
+            "__LANG__": strings["html_lang"]}
     path = outdir / "index.html"
-    path.write_text(page, encoding="utf-8")
+    path.write_text(_fill(INDEX, subs, strings), encoding="utf-8")
     return path

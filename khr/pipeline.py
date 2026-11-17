@@ -19,6 +19,7 @@ class Result:
     message: str = ""
     quotes: int = 0
     added_to_clippings: int = 0
+    unresolved: int = 0
     files: list[Path] = field(default_factory=list)
 
 
@@ -60,7 +61,7 @@ def _unique_stem(outdir: Path, title: str, asin: str, taken: set[str]) -> str:
 
 def export_book(ann: BookAnnotations, kfx: Path, outdir: Path,
                 clippings_file: Path | None = None, formats=FORMATS,
-                taken: set[str] | None = None) -> Result:
+                taken: set[str] | None = None, lang: str | None = None) -> Result:
     if taken is None:
         taken = set()
     if not file_contains_asin(kfx, ann.asin):
@@ -73,7 +74,8 @@ def export_book(ann: BookAnnotations, kfx: Path, outdir: Path,
         return Result(ann.asin, "error", message=str(exc))
 
     exp = export.build(ann, book)
-    res = Result(ann.asin, "ok", title=exp.title, quotes=len(exp.quotes))
+    res = Result(ann.asin, "ok", title=exp.title, quotes=len(exp.quotes),
+                 unresolved=exp.unresolved)
     if not exp.quotes:
         res.status = "empty"
         res.message = "No highlight could be matched to the book's text."
@@ -84,9 +86,9 @@ def export_book(ann: BookAnnotations, kfx: Path, outdir: Path,
     outdir.mkdir(parents=True, exist_ok=True)
     stem = _unique_stem(outdir, exp.title, ann.asin, taken)
     if "html" in formats:
-        res.files.append(html_page.write(exp, outdir / f"{stem}.html"))
+        res.files.append(html_page.write(exp, outdir / f"{stem}.html", lang))
     if "md" in formats:
-        res.files.append(export.write_markdown(exp, outdir / f"{stem}.md"))
+        res.files.append(export.write_markdown(exp, outdir / f"{stem}.md", lang))
     if "json" in formats:
         res.files.append(export.write_json(exp, outdir / f"{stem}.json"))
     if clippings_file is not None:

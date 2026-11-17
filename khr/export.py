@@ -107,18 +107,21 @@ def write_json(export: BookExport, path: Path) -> Path:
     return path
 
 
-def write_markdown(export: BookExport, path: Path) -> Path:
+def write_markdown(export: BookExport, path: Path, lang: str | None = None) -> Path:
+    from . import i18n
+    strings = i18n.page_strings(lang)
+    note = f"**{strings['note']}:**"
     out = [f"# {export.title}", ""]
     if export.authors:
         out += [f"*{export.author_line}*", ""]
     for q in export.quotes:
         if q.kind == "note":
-            out.append(f"**Note:** {q.text}")
+            out.append(f"{note} {q.text}")
         else:
             out += [f"> {line}" if line else ">" for line in q.text.split("\n")]
             for n in q.notes:
-                out.append(f"\n**Note:** {n}")
-        meta = [f"p. {q.page}" if q.page else "", q.created.strftime("%Y-%m-%d") if q.created else ""]
+                out.append(f"\n{note} {n}")
+        meta = [f"{strings['page_abbr']} {q.page}" if q.page else "", q.created.strftime("%Y-%m-%d") if q.created else ""]
         meta = " · ".join(m for m in meta if m)
         if meta:
             out.append(f"\n<sub>{meta}</sub>")
